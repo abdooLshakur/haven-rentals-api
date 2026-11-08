@@ -1,0 +1,17 @@
+const router = require("express").Router();
+const controller = require("../controllers/RentalController");
+const { authenticate, allowRoles } = require("../middleware/auth");
+const { paymentEvidenceUpload } = require("../middleware/upload");
+const { uploadPaymentEvidence } = require("../controllers/UploadController");
+router.use(authenticate);
+router.post("/applications", allowRoles("tenant"), controller.createApplication);
+router.get("/applications", controller.listApplications);
+router.patch("/applications/:id", allowRoles("tenant", "landlord", "admin"), controller.reviewApplication);
+router.post("/leases", allowRoles("landlord", "admin"), controller.createLease);
+router.get("/leases", controller.listLeases);
+router.post("/payments", allowRoles("landlord", "admin"), controller.createPayment);
+router.get("/payments", controller.listPayments);
+router.post("/uploads/payment-evidence", allowRoles("tenant"), paymentEvidenceUpload.array("evidence", 4), uploadPaymentEvidence);
+router.post("/payments/:id/submit", allowRoles("tenant"), controller.submitPayment);
+router.patch("/payments/:id", allowRoles("landlord", "admin"), controller.updatePayment);
+module.exports = router;

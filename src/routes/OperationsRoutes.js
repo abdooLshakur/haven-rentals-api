@@ -1,0 +1,12 @@
+const router = require("express").Router();
+const controller = require("../controllers/OperationsController");
+const { authenticate, allowRoles } = require("../middleware/auth");
+router.use(authenticate);
+router.post("/maintenance", allowRoles("tenant"), controller.createMaintenance);
+router.get("/maintenance", controller.listMaintenance);
+router.patch("/maintenance/:id", allowRoles("landlord", "agent", "admin"), controller.updateMaintenance);
+router.post("/favorites", allowRoles("tenant"), controller.toggleFavorite);
+router.get("/favorites", allowRoles("tenant"), controller.listFavorites);
+router.get("/notifications", controller.listNotifications);
+router.patch("/notifications/:id/read", controller.markNotificationRead);
+module.exports = router;
