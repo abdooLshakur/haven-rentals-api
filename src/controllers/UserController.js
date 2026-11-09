@@ -35,6 +35,24 @@ const register = async (req, res) => {
   }
 };
 
+const registerAdmin = async (req, res) => {
+  try {
+    const { first_name, last_name, email, phone, gender, dob, password, avatar, admin_invite_code } = req.body;
+    const configuredCode = process.env.ADMIN_SIGNUP_CODE;
+    if (!configuredCode) return res.status(503).json({ success: false, message: "Admin signup has not been configured" });
+    if (!admin_invite_code || admin_invite_code.length !== configuredCode.length || !crypto.timingSafeEqual(Buffer.from(admin_invite_code), Buffer.from(configuredCode))) {
+      return res.status(401).json({ success: false, message: "Invalid admin registration code" });
+    }
+    if (!first_name || !last_name || !email || !phone || !password) return res.status(400).json({ success: false, message: "First name, last name, email, phone, and password are required" });
+    if (password.length < 8) return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
+    if (await User.exists({ email: email.toLowerCase() })) return res.status(409).json({ success: false, message: "Email already exists. Use the normal login page." });
+    const user = await User.create({ first_name, last_name, email, phone, gender, dob, avatar, role: "admin", password: await bcrypt.hash(password, 12) });
+    res.status(201).json({ success: true, message: "Administrator account created. You can now sign in normally.", data: { user: publicUser(user), access_token: createAccessToken(user) } });
+  } catch (error) {
+    res.status(400).json({ success: false, message: "Could not create administrator account", error: error.message });
+  }
+};
+
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -124,4 +142,4 @@ const bootstrapAdmin = async (req, res) => {
   }
 };
 
-module.exports = { register, login, forgotPassword, resetPassword, getProfile, listAgents, bootstrapAdmin };
+module.exports = { register, registerAdmin, login, forgotPassword, resetPassword, getProfile, listAgents, bootstrapAdmin };
