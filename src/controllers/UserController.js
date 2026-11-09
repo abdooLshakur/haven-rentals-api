@@ -103,4 +103,25 @@ const listAgents = async (req, res) => {
   res.json({ success: true, data: agents });
 };
 
-module.exports = { register, login, forgotPassword, resetPassword, getProfile, listAgents };
+const bootstrapAdmin = async (req, res) => {
+  try {
+    const configuredSecret = process.env.ADMIN_BOOTSTRAP_SECRET;
+    const providedSecret = req.get("x-admin-bootstrap-secret");
+    if (!configuredSecret) return res.status(503).json({ success: false, message: "Admin bootstrap has not been configured" });
+    if (!providedSecret || providedSecret.length !== configuredSecret.length || !crypto.timingSafeEqual(Buffer.from(providedSecret), Buffer.from(configuredSecret))) {
+      return res.status(401).json({ success: false, message: "Invalid admin bootstrap secret" });
+    }
+    if (await User.exists({ role: "admin" })) return res.status(409).json({ success: false, message: "An administrator already exists. This one-time setup route is locked." });
+    const email = String(req.body.email || "").toLowerCase().trim();
+    if (!email) return res.status(400).json({ success: false, message: "The existing account email is required" });
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ success: false, message: "No account exists for this email. Register the account first." });
+    user.role = "admin";
+    await user.save();
+    res.json({ success: true, message: "Administrator created. Sign out and sign in again to use the admin dashboard.", data: { user: publicUser(user) } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Could not create the administrator" });
+  }
+};
+
+module.exports = { register, login, forgotPassword, resetPassword, getProfile, listAgents, bootstrapAdmin };
