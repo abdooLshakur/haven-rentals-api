@@ -9,12 +9,20 @@ const appointmentRoutes = require("./routes/AppointmentRoutes");
 const rentalRoutes = require("./routes/RentalRoutes");
 const operationsRoutes = require("./routes/OperationsRoutes");
 const contactRoutes = require("./routes/ContactRoutes");
+const agentRoutes = require("./routes/AgentRoutes");
 
 const app = express();
+const allowedOrigins = (process.env.CORS_ORIGINS || "https://haven-rentals-tau.vercel.app,http://localhost:5000")
+  .split(",").map((origin) => origin.trim()).filter(Boolean);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("Origin is not allowed"));
+  },
+}));
 app.use(express.static(path.join(__dirname, "../public")));
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
@@ -30,6 +38,7 @@ app.use("/api/v1", appointmentRoutes);
 app.use("/api/v1", rentalRoutes);
 app.use("/api/v1", operationsRoutes);
 app.use("/api/v1", contactRoutes);
+app.use("/api/v1", agentRoutes);
 
 app.use((error, req, res, next) => {
   if (error) return res.status(400).json({ success: false, message: error.message || "Request could not be processed" });
