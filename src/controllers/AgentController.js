@@ -55,6 +55,9 @@ const listProperties = async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
   if (req.query.location) filter.location = new RegExp(req.query.location, "i");
+  if (req.query.area) filter["address.area"] = new RegExp(req.query.area, "i");
+  if (req.query.city) filter["address.city"] = new RegExp(req.query.city, "i");
+  if (req.query.state) filter["address.state"] = new RegExp(req.query.state, "i");
   applyListingIntentFilter(filter, req.query.listing_intent);
   if (req.query.price_period) filter.price_period = req.query.price_period;
   const minPrice = req.query.min_price || req.query.min_rent;
