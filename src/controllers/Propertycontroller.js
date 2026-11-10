@@ -15,12 +15,25 @@ const coordinatesFromMapUrl = (mapUrl) => {
 
 const pagination = (query) => ({ page: Math.max(Number(query.page) || 1, 1), limit: Math.min(Math.max(Number(query.limit) || 12, 1), 100) });
 
+const listingTerms = (record = {}) => {
+  const listing_intent = record.listing_intent === "sale" ? "sale" : "rent";
+  const price_period = listing_intent === "sale"
+    ? "one_time"
+    : ["monthly", "annual"].includes(record.price_period) ? record.price_period : "annual";
+  return { listing_intent, price_period };
+};
+
+const applyListingIntentFilter = (filter, intent) => {
+  if (intent === "sale") filter.listing_intent = "sale";
+  if (intent === "rent") filter.$and = [...(filter.$and || []), { $or: [{ listing_intent: "rent" }, { listing_intent: { $exists: false } }] }];
+};
+
 const createProperty = async (req, res) => {
   try {
     const { type, name, location } = req.body;
     if (!type || !name || !location) return res.status(400).json({ success: false, message: "Type, name, and location are required" });
     const geoLocation = req.body.geo_location || coordinatesFromMapUrl(req.body.map_url);
-    const property = await Property.create({ ...req.body, ...(geoLocation && { geo_location: geoLocation }), landlord_id: req.user._id, status: req.body.status || "draft" });
+    const property = await Property.create({ ...req.body, ...listingTerms(req.body), ...(geoLocation && { geo_location: geoLocation }), landlord_id: req.user._id, status: req.body.status || "draft" });
     res.status(201).json({ success: true, message: "Property created successfully", data: property });
   } catch (error) {
     res.status(400).json({ success: false, message: "Failed to create property", error: error.message });
@@ -58,6 +71,7 @@ const importProperties = async (req, res) => {
         bedrooms: record.bedrooms,
         bathrooms: record.bathrooms,
         valuation: record.valuation,
+        ...listingTerms(record),
         currency: record.currency || "NGN",
         images: Array.isArray(record.images) ? record.images : [],
         amenities: Array.isArray(record.amenities) ? record.amenities : [],
@@ -81,10 +95,14 @@ const listProperties = async (req, res) => {
   if (req.query.city) filter["address.city"] = new RegExp(req.query.city, "i");
   if (req.query.area) filter["address.area"] = new RegExp(req.query.area, "i");
   if (req.query.local_government) filter["address.local_government"] = new RegExp(req.query.local_government, "i");
-  if (req.query.min_rent || req.query.max_rent) {
+  applyListingIntentFilter(filter, req.query.listing_intent);
+  if (req.query.price_period) filter.price_period = req.query.price_period;
+  const minPrice = req.query.min_price || req.query.min_rent;
+  const maxPrice = req.query.max_price || req.query.max_rent;
+  if (minPrice || maxPrice) {
     filter.valuation = {};
-    if (req.query.min_rent) filter.valuation.$gte = Number(req.query.min_rent);
-    if (req.query.max_rent) filter.valuation.$lte = Number(req.query.max_rent);
+    if (minPrice) filter.valuation.$gte = Number(minPrice);
+    if (maxPrice) filter.valuation.$lte = Number(maxPrice);
   }
   if (req.query.min_bedrooms) filter.bedrooms = { $gte: Number(req.query.min_bedrooms) };
   if (req.query.min_bathrooms) filter.bathrooms = { $gte: Number(req.query.min_bathrooms) };
@@ -117,8 +135,9 @@ const updateProperty = async (req, res) => {
     || property.landlord_id.toString() === req.user.id
     || (req.user.role === "agent" && property.agent_id?.toString() === req.user.id);
   if (!canManage) return res.status(403).json({ success: false, message: "You cannot update this property" });
-  const editable = ["type", "name", "description", "location", "address", "geo_location", "map_url", "nearby_landmarks", "measurement", "bedrooms", "bathrooms", "valuation", "currency", "images", "amenities", "status"];
+  const editable = ["type", "name", "description", "location", "address", "geo_location", "map_url", "nearby_landmarks", "measurement", "bedrooms", "bathrooms", "valuation", "listing_intent", "price_period", "currency", "images", "amenities", "status"];
   editable.forEach((field) => { if (req.body[field] !== undefined) property[field] = req.body[field]; });
+  if (req.body.listing_intent !== undefined || req.body.price_period !== undefined) Object.assign(property, listingTerms({ listing_intent: property.listing_intent, price_period: property.price_period }));
   if (req.body.map_url && req.body.geo_location === undefined) property.geo_location = coordinatesFromMapUrl(req.body.map_url) || property.geo_location;
   await property.save();
   res.json({ success: true, message: "Property updated successfully", data: property });

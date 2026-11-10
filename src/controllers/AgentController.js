@@ -15,6 +15,11 @@ const AVAILABLE_SCOPES = [
   "viewings:propose_reschedule", "applications:read", "maintenance:read", "marketing:drafts",
 ];
 
+const applyListingIntentFilter = (filter, intent) => {
+  if (intent === "sale") filter.listing_intent = "sale";
+  if (intent === "rent") filter.$and = [...(filter.$and || []), { $or: [{ listing_intent: "rent" }, { listing_intent: { $exists: false } }] }];
+};
+
 const audit = (req, action, outcome, resource = {}, details = {}) => AgentAuditLog.create({
   api_key_id: req.agentKey._id, action, outcome, resource_type: resource.type, resource_id: resource.id?.toString(),
   ip_address: req.ip, details,
@@ -50,11 +55,19 @@ const listProperties = async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
   if (req.query.location) filter.location = new RegExp(req.query.location, "i");
-  if (req.query.max_rent) filter.valuation = { $lte: Number(req.query.max_rent) };
+  applyListingIntentFilter(filter, req.query.listing_intent);
+  if (req.query.price_period) filter.price_period = req.query.price_period;
+  const minPrice = req.query.min_price || req.query.min_rent;
+  const maxPrice = req.query.max_price || req.query.max_rent;
+  if (minPrice || maxPrice) {
+    filter.valuation = {};
+    if (minPrice) filter.valuation.$gte = Number(minPrice);
+    if (maxPrice) filter.valuation.$lte = Number(maxPrice);
+  }
   if (req.query.min_bedrooms) filter.bedrooms = { $gte: Number(req.query.min_bedrooms) };
   const [properties, houses] = await Promise.all([
-    Property.find(filter).select("name type location address bedrooms bathrooms valuation currency status map_url nearby_landmarks amenities images").limit(100),
-    House.find(filter).select("name type location address bedrooms bathrooms valuation currency status map_url nearby_landmarks amenities images").limit(100),
+    Property.find(filter).select("name type location address bedrooms bathrooms valuation listing_intent price_period currency status map_url nearby_landmarks amenities images").limit(100),
+    House.find(filter).select("name type location address bedrooms bathrooms valuation listing_intent price_period currency status map_url nearby_landmarks amenities images").limit(100),
   ]);
   await audit(req, "properties.list", "success", {}, { count: properties.length + houses.length });
   res.json({ success: true, data: [...properties.map((item) => ({ ...item.toObject(), listing_kind: "property" })), ...houses.map((item) => ({ ...item.toObject(), listing_kind: "house" }))] });

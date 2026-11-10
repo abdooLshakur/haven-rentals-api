@@ -15,8 +15,9 @@ const paymentListing = async (payment) => {
 const createApplication = async (req, res) => {
   const { property_id, house_id } = req.body;
   if (!property_id && !house_id) return res.status(400).json({ success: false, message: "A property_id or house_id is required" });
-  if (house_id && !(await House.exists({ _id: house_id, status: "available" }))) return res.status(400).json({ success: false, message: "Available rental unit not found" });
-  if (property_id && !(await Property.exists({ _id: property_id, status: "available" }))) return res.status(400).json({ success: false, message: "Available property not found" });
+  const rentalListing = { status: "available", $or: [{ listing_intent: "rent" }, { listing_intent: { $exists: false } }] };
+  if (house_id && !(await House.exists({ _id: house_id, ...rentalListing }))) return res.status(400).json({ success: false, message: "Available rental unit not found" });
+  if (property_id && !(await Property.exists({ _id: property_id, ...rentalListing }))) return res.status(400).json({ success: false, message: "This listing is not available to rent" });
   const application = await Application.create({ ...req.body, tenant_id: req.user._id });
   const listing = property_id ? await Property.findById(property_id) : await House.findById(house_id);
   await createNotification(listing?.landlord_id, "application_submitted", "New rental application", `${req.user.first_name} ${req.user.last_name} submitted an application.`, "/dashboard/applications");

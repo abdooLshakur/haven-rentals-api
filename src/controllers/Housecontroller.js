@@ -2,6 +2,17 @@ const House = require("../models/HouseModel");
 const Property = require("../models/propertymodels");
 const User = require("../models/UserModel");
 
+const listingTerms = (record = {}) => {
+  const listing_intent = record.listing_intent === "sale" ? "sale" : "rent";
+  const price_period = listing_intent === "sale" ? "one_time" : ["monthly", "annual"].includes(record.price_period) ? record.price_period : "annual";
+  return { listing_intent, price_period };
+};
+
+const applyListingIntentFilter = (filter, intent) => {
+  if (intent === "sale") filter.listing_intent = "sale";
+  if (intent === "rent") filter.$and = [...(filter.$and || []), { $or: [{ listing_intent: "rent" }, { listing_intent: { $exists: false } }] }];
+};
+
 const createHouse = async (req, res) => {
   try {
     const { name, location, valuation, property_id } = req.body;
@@ -11,7 +22,7 @@ const createHouse = async (req, res) => {
       if (!property) return res.status(404).json({ success: false, message: "Property not found" });
       if (req.user.role !== "admin" && property.landlord_id.toString() !== req.user.id) return res.status(403).json({ success: false, message: "You cannot add a unit to this property" });
     }
-    const house = await House.create({ ...req.body, landlord_id: req.user._id });
+    const house = await House.create({ ...req.body, ...listingTerms(req.body), landlord_id: req.user._id });
     res.status(201).json({ success: true, message: "Rental unit created successfully", data: house });
   } catch (error) {
     res.status(400).json({ success: false, message: "Failed to create rental unit", error: error.message });
@@ -27,10 +38,14 @@ const getAllHouses = async (req, res) => {
   if (req.query.city) filter["address.city"] = new RegExp(req.query.city, "i");
   if (req.query.area) filter["address.area"] = new RegExp(req.query.area, "i");
   if (req.query.local_government) filter["address.local_government"] = new RegExp(req.query.local_government, "i");
-  if (req.query.min_rent || req.query.max_rent) {
+  applyListingIntentFilter(filter, req.query.listing_intent);
+  if (req.query.price_period) filter.price_period = req.query.price_period;
+  const minPrice = req.query.min_price || req.query.min_rent;
+  const maxPrice = req.query.max_price || req.query.max_rent;
+  if (minPrice || maxPrice) {
     filter.valuation = {};
-    if (req.query.min_rent) filter.valuation.$gte = Number(req.query.min_rent);
-    if (req.query.max_rent) filter.valuation.$lte = Number(req.query.max_rent);
+    if (minPrice) filter.valuation.$gte = Number(minPrice);
+    if (maxPrice) filter.valuation.$lte = Number(maxPrice);
   }
   if (req.query.min_bedrooms) filter.bedrooms = { $gte: Number(req.query.min_bedrooms) };
   if (req.query.min_bathrooms) filter.bathrooms = { $gte: Number(req.query.min_bathrooms) };

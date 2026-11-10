@@ -39,6 +39,9 @@ const propertySchema = new mongoose.Schema(
     bedrooms: { type: Number, min: 0 },
     bathrooms: { type: Number, min: 0 },
     valuation: { type: Number, min: 0 },
+    // Valuation is the listing price. These fields make its meaning explicit.
+    listing_intent: { type: String, enum: ["rent", "sale"], default: "rent", index: true },
+    price_period: { type: String, enum: ["monthly", "annual", "one_time"], default: "annual" },
     currency: { type: String, default: "NGN", uppercase: true, trim: true },
     images: [{ type: String }],
     amenities: [{ type: String, trim: true }],
