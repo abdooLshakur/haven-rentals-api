@@ -1,5 +1,8 @@
 const crypto = require("crypto");
 const AgentApiKey = require("../models/AgentApiKey");
+const User = require("../models/UserModel");
+const { verifyDelegationToken } = require("./auth");
+const { userRoles, verifiedContext } = require("../services/accessControl");
 
 const hashKey = (key) => crypto.createHash("sha256").update(key).digest("hex");
 
@@ -27,4 +30,44 @@ const requireAgentScope = (...scopes) => (req, res, next) => {
   next();
 };
 
-module.exports = { hashKey, authenticateAgent, requireAgentScope };
+const loadDelegatedUser = async (req, required) => {
+  const token = req.get("x-haven-delegation");
+  if (!token) {
+    if (required) throw new Error("A verified user delegation is required");
+    return null;
+  }
+  const payload = verifyDelegationToken(token);
+  if (payload.agent_key_id && payload.agent_key_id !== req.agentKey._id.toString()) throw new Error("Delegation token is not valid for this agent application");
+  const user = await User.findById(payload.user_id);
+  if (!user || !user.is_active || (payload.ver || 0) !== (user.auth_version || 0)) throw new Error("Delegated user is no longer available");
+  if (!userRoles(user).includes(payload.active_role)) throw new Error("Delegated active role is no longer valid");
+  return { user, context: verifiedContext(user, payload.active_role), token: payload };
+};
+
+const requireUserDelegation = async (req, res, next) => {
+  try {
+    const delegated = await loadDelegatedUser(req, true);
+    req.delegatedUser = delegated.user;
+    req.delegatedContext = delegated.context;
+    req.delegation = delegated.token;
+    next();
+  } catch (error) {
+    res.status(error.message === "Agent delegation is not configured" ? 503 : 401).json({ success: false, message: error.message || "Invalid or expired user delegation" });
+  }
+};
+
+const optionalUserDelegation = async (req, res, next) => {
+  try {
+    const delegated = await loadDelegatedUser(req, false);
+    if (delegated) {
+      req.delegatedUser = delegated.user;
+      req.delegatedContext = delegated.context;
+      req.delegation = delegated.token;
+    }
+    next();
+  } catch (error) {
+    res.status(error.message === "Agent delegation is not configured" ? 503 : 401).json({ success: false, message: error.message || "Invalid or expired user delegation" });
+  }
+};
+
+module.exports = { hashKey, authenticateAgent, requireAgentScope, requireUserDelegation, optionalUserDelegation };

@@ -1,7 +1,8 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const User = require("../models/UserModel");
-const { createAccessToken } = require("../middleware/auth");
+const { createAccessToken, createDelegationToken } = require("../middleware/auth");
+const { userRoles, activeRoleFor, verifiedContext } = require("../services/accessControl");
 
 const publicUser = (user) => ({
   id: user._id,
@@ -10,6 +11,7 @@ const publicUser = (user) => ({
   email: user.email,
   phone: user.phone,
   role: user.role,
+  roles: userRoles(user),
   avatar: user.avatar,
 });
 
@@ -27,6 +29,7 @@ const register = async (req, res) => {
     const user = await User.create({
       first_name, last_name, email, phone, gender, dob, avatar,
       role: role === "landlord" ? "landlord" : "tenant",
+      roles: [role === "landlord" ? "landlord" : "tenant"],
       password: await bcrypt.hash(password, 12),
     });
     res.status(201).json({ success: true, message: "User created successfully", data: { user: publicUser(user), access_token: createAccessToken(user) } });
@@ -46,7 +49,7 @@ const registerAdmin = async (req, res) => {
     if (!first_name || !last_name || !email || !phone || !password) return res.status(400).json({ success: false, message: "First name, last name, email, phone, and password are required" });
     if (password.length < 8) return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
     if (await User.exists({ email: email.toLowerCase() })) return res.status(409).json({ success: false, message: "Email already exists. Use the normal login page." });
-    const user = await User.create({ first_name, last_name, email, phone, gender, dob, avatar, role: "admin", password: await bcrypt.hash(password, 12) });
+    const user = await User.create({ first_name, last_name, email, phone, gender, dob, avatar, role: "admin", roles: ["admin"], password: await bcrypt.hash(password, 12) });
     res.status(201).json({ success: true, message: "Administrator account created. You can now sign in normally.", data: { user: publicUser(user), access_token: createAccessToken(user) } });
   } catch (error) {
     res.status(400).json({ success: false, message: "Could not create administrator account", error: error.message });
@@ -62,7 +65,7 @@ const login = async (req, res) => {
       return res.status(401).json({ success: false, message: "Invalid email or password" });
     }
     if (!user.is_active) return res.status(403).json({ success: false, message: "This account is inactive" });
-    res.json({ success: true, message: "Login successful", data: { user: publicUser(user), access_token: createAccessToken(user) } });
+    res.json({ success: true, message: "Login successful", data: { user: publicUser(user), access_token: createAccessToken(user, activeRoleFor(user)) } });
   } catch (error) {
     res.status(500).json({ success: false, message: "Login failed", error: error.message });
   }
@@ -105,6 +108,7 @@ const resetPassword = async (req, res) => {
     if (!user) return res.status(400).json({ success: false, message: "This reset link is invalid or has expired" });
 
     user.password = await bcrypt.hash(password, 12);
+    user.auth_version = (user.auth_version || 0) + 1;
     user.password_reset_token_hash = undefined;
     user.password_reset_expires_at = undefined;
     await user.save();
@@ -114,7 +118,26 @@ const resetPassword = async (req, res) => {
   }
 };
 
-const getProfile = (req, res) => res.json({ success: true, data: publicUser(req.user) });
+const getProfile = (req, res) => res.json({ success: true, data: { ...publicUser(req.user), active_role: req.activeRole, context: verifiedContext(req.user, req.activeRole) } });
+
+const setActiveRole = async (req, res) => {
+  const role = req.body.active_role;
+  if (!userRoles(req.user).includes(role)) return res.status(403).json({ success: false, message: "You do not hold that role" });
+  res.json({ success: true, data: { user: publicUser(req.user), active_role: role, access_token: createAccessToken(req.user, role) } });
+};
+
+const createAgentDelegation = async (req, res) => {
+  const activeRole = req.body.active_role || req.activeRole;
+  if (!userRoles(req.user).includes(activeRole)) return res.status(403).json({ success: false, message: "You do not hold that role" });
+  const token = createDelegationToken(req.user, activeRole, req.body.agent_key_id, req.body.conversation_id);
+  res.status(201).json({ success: true, data: { delegation_token: token, expires_in_seconds: 600, context: verifiedContext(req.user, activeRole) } });
+};
+
+const logout = async (req, res) => {
+  req.user.auth_version = (req.user.auth_version || 0) + 1;
+  await req.user.save();
+  res.json({ success: true, message: "Signed out. Existing access and delegation tokens were revoked." });
+};
 
 const listAgents = async (req, res) => {
   const agents = await User.find({ role: "agent", is_active: true }).select("first_name last_name email phone avatar");
@@ -135,6 +158,7 @@ const bootstrapAdmin = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, message: "No account exists for this email. Register the account first." });
     user.role = "admin";
+    user.roles = [...new Set([...userRoles(user), "admin"])];
     await user.save();
     res.json({ success: true, message: "Administrator created. Sign out and sign in again to use the admin dashboard.", data: { user: publicUser(user) } });
   } catch (error) {
@@ -142,4 +166,4 @@ const bootstrapAdmin = async (req, res) => {
   }
 };
 
-module.exports = { register, registerAdmin, login, forgotPassword, resetPassword, getProfile, listAgents, bootstrapAdmin };
+module.exports = { register, registerAdmin, login, forgotPassword, resetPassword, getProfile, setActiveRole, createAgentDelegation, logout, listAgents, bootstrapAdmin };

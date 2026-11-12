@@ -11,7 +11,10 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, select: false },
     password_reset_token_hash: { type: String, select: false },
     password_reset_expires_at: { type: Date, select: false },
+    // role remains the legacy/default role. roles enables verified active-role selection.
     role: { type: String, enum: ["landlord", "agent", "tenant", "admin"], default: "tenant" },
+    roles: [{ type: String, enum: ["landlord", "agent", "tenant", "admin"] }],
+    auth_version: { type: Number, default: 0 },
     avatar: String,
     is_active: { type: Boolean, default: true },
   },

@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 
 const agentAuditLogSchema = new mongoose.Schema({
   api_key_id: { type: mongoose.Schema.Types.ObjectId, ref: "AgentApiKey", required: true, index: true },
+  acting_user_id: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, index: true },
+  active_role: { type: String, enum: ["tenant", "landlord", "agent", "admin"], default: null },
   action: { type: String, required: true, trim: true, index: true },
   resource_type: { type: String, trim: true },
   resource_id: { type: String, trim: true },
