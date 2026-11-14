@@ -21,6 +21,13 @@ const applyListingIntentFilter = (filter, intent) => {
   if (intent === "rent") filter.$and = [...(filter.$and || []), { $or: [{ listing_intent: "rent" }, { listing_intent: { $exists: false } }] }];
 };
 
+const pagination = (query) => ({
+  page: Math.min(Math.max(Number.parseInt(query.page, 10) || 1, 1), 100),
+  limit: Math.min(Math.max(Number.parseInt(query.limit, 10) || 25, 1), 50),
+});
+const pageMeta = (page, limit, total) => ({ page, limit, total, pages: Math.ceil(total / limit) });
+const withCondition = (filter, condition) => Object.keys(filter).length ? { $and: [filter, condition] } : condition;
+
 const audit = (req, action, outcome, resource = {}, details = {}) => AgentAuditLog.create({
   api_key_id: req.agentKey._id, action, outcome, resource_type: resource.type, resource_id: resource.id?.toString(),
   acting_user_id: req.delegatedUser?._id || null, active_role: req.delegatedContext?.active_role || null,
@@ -99,6 +106,7 @@ const revokeKey = async (req, res) => {
 const agentCapabilities = async (req, res) => res.json({ success: true, data: { scopes: req.agentKey.scopes, safeguards: ["No payment approval", "No account management", "No outbound marketing sends", "All agent calls are audited"] } });
 
 const listProperties = async (req, res) => {
+  const { page, limit } = pagination(req.query);
   let filter = scopedListingFilter(req);
   if (req.query.status && ["landlord", "agent", "admin"].includes(actorRole(req))) filter.status = req.query.status;
   if (req.query.location) filter.location = new RegExp(req.query.location, "i");
@@ -115,23 +123,34 @@ const listProperties = async (req, res) => {
     if (maxPrice) filter.valuation.$lte = Number(maxPrice);
   }
   if (req.query.min_bedrooms) filter.bedrooms = { $gte: Number(req.query.min_bedrooms) };
-  const [properties, houses] = await Promise.all([
-    Property.find(filter).select("name type location address bedrooms bathrooms valuation listing_intent price_period currency status map_url nearby_landmarks amenities images").limit(100),
-    House.find(filter).select("name type location address bedrooms bathrooms valuation listing_intent price_period currency status map_url nearby_landmarks amenities images").limit(100),
+  const upperBound = page * limit;
+  const [properties, houses, propertyTotal, houseTotal] = await Promise.all([
+    Property.find(filter).select("name type location address bedrooms bathrooms valuation listing_intent price_period currency status map_url nearby_landmarks amenities images createdAt").sort({ createdAt: -1 }).limit(upperBound),
+    House.find(filter).select("name type location address bedrooms bathrooms valuation listing_intent price_period currency status map_url nearby_landmarks amenities images createdAt").sort({ createdAt: -1 }).limit(upperBound),
+    Property.countDocuments(filter),
+    House.countDocuments(filter),
   ]);
-  await audit(req, "properties.list", "success", {}, { count: properties.length + houses.length });
+  const total = propertyTotal + houseTotal;
+  await audit(req, "properties.list", "success", {}, { count: total, page, limit });
   const appUrl = (process.env.PUBLIC_APP_URL || "https://haven-rentals-tau.vercel.app").replace(/\/$/, "");
   const serialize = (item, listing_kind) => ({ ...item.toObject(), listing_kind, property_page_url: `${appUrl}/#/home/${item._id}` });
-  res.json({ success: true, data: [...properties.map((item) => serialize(item, "property")), ...houses.map((item) => serialize(item, "house"))] });
+  const listings = [...properties.map((item) => serialize(item, "property")), ...houses.map((item) => serialize(item, "house"))]
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt))
+    .slice((page - 1) * limit, page * limit);
+  res.json({ success: true, data: listings, meta: pageMeta(page, limit, total) });
 };
 
 const listEnquiries = async (req, res) => {
-  const filter = await enquiryFilterFor(req);
+  const { page, limit } = pagination(req.query);
+  let filter = await enquiryFilterFor(req);
   if (req.query.status) filter.status = req.query.status;
-  if (req.query.search) filter.$or = ["full_name", "email", "phone", "message"].map((field) => ({ [field]: new RegExp(req.query.search, "i") }));
-  const enquiries = await Enquiry.find(filter).populate("property_id", "name location").populate("house_id", "name location").sort({ date_created: -1 }).limit(100);
-  await audit(req, "enquiries.list", "success", {}, { count: enquiries.length });
-  res.json({ success: true, data: enquiries });
+  if (req.query.search) filter = withCondition(filter, { $or: ["full_name", "email", "phone", "message"].map((field) => ({ [field]: new RegExp(req.query.search, "i") })) });
+  const [enquiries, total] = await Promise.all([
+    Enquiry.find(filter).populate("property_id", "name location").populate("house_id", "name location").sort({ date_created: -1 }).skip((page - 1) * limit).limit(limit),
+    Enquiry.countDocuments(filter),
+  ]);
+  await audit(req, "enquiries.list", "success", {}, { count: total, page, limit });
+  res.json({ success: true, data: enquiries, meta: pageMeta(page, limit, total) });
 };
 
 const updateEnquiry = async (req, res) => {
@@ -145,11 +164,15 @@ const updateEnquiry = async (req, res) => {
 };
 
 const listViewings = async (req, res) => {
+  const { page, limit } = pagination(req.query);
   const filter = await viewingFilterFor(req);
   if (req.query.status) filter.status = req.query.status;
-  const viewings = await ViewingAppointment.find(filter).populate("property_id", "name location").populate("house_id", "name location").sort({ scheduled_at: 1 }).limit(100);
-  await audit(req, "viewings.list", "success", {}, { count: viewings.length });
-  res.json({ success: true, data: viewings });
+  const [viewings, total] = await Promise.all([
+    ViewingAppointment.find(filter).populate("property_id", "name location").populate("house_id", "name location").sort({ scheduled_at: 1 }).skip((page - 1) * limit).limit(limit),
+    ViewingAppointment.countDocuments(filter),
+  ]);
+  await audit(req, "viewings.list", "success", {}, { count: total, page, limit });
+  res.json({ success: true, data: viewings, meta: pageMeta(page, limit, total) });
 };
 
 const proposeReschedule = async (req, res) => {
@@ -169,19 +192,27 @@ const proposeReschedule = async (req, res) => {
 };
 
 const listApplications = async (req, res) => {
+  const { page, limit } = pagination(req.query);
   const filter = await applicationFilterFor(req);
   if (req.query.status) filter.status = req.query.status;
-  const applications = await RentalApplication.find(filter).populate("tenant_id", "first_name last_name email phone").populate("property_id", "name location").populate("house_id", "name location").sort({ createdAt: -1 }).limit(100);
-  await audit(req, "applications.list", "success", {}, { count: applications.length });
-  res.json({ success: true, data: applications });
+  const [applications, total] = await Promise.all([
+    RentalApplication.find(filter).populate("tenant_id", "first_name last_name email phone").populate("property_id", "name location").populate("house_id", "name location").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+    RentalApplication.countDocuments(filter),
+  ]);
+  await audit(req, "applications.list", "success", {}, { count: total, page, limit });
+  res.json({ success: true, data: applications, meta: pageMeta(page, limit, total) });
 };
 
 const listMaintenance = async (req, res) => {
+  const { page, limit } = pagination(req.query);
   const filter = await maintenanceFilterFor(req);
   if (req.query.status) filter.status = req.query.status;
-  const requests = await MaintenanceRequest.find(filter).populate("house_id", "name location").populate("tenant_id", "first_name last_name phone").sort({ createdAt: -1 }).limit(100);
-  await audit(req, "maintenance.list", "success", {}, { count: requests.length });
-  res.json({ success: true, data: requests });
+  const [requests, total] = await Promise.all([
+    MaintenanceRequest.find(filter).populate("house_id", "name location").populate("tenant_id", "first_name last_name phone").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+    MaintenanceRequest.countDocuments(filter),
+  ]);
+  await audit(req, "maintenance.list", "success", {}, { count: total, page, limit });
+  res.json({ success: true, data: requests, meta: pageMeta(page, limit, total) });
 };
 
 const createDraft = async (req, res) => {

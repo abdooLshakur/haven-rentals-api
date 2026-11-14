@@ -70,4 +70,12 @@ const optionalUserDelegation = async (req, res, next) => {
   }
 };
 
-module.exports = { hashKey, authenticateAgent, requireAgentScope, requireUserDelegation, optionalUserDelegation };
+const requireUserPermission = (permissionPrefix) => (req, res, next) => {
+  const permissions = req.delegatedContext?.permissions || [];
+  if (!permissions.some((permission) => permission === permissionPrefix || permission.startsWith(`${permissionPrefix}:`))) {
+    return res.status(403).json({ success: false, message: "The delegated user does not have permission for this action" });
+  }
+  next();
+};
+
+module.exports = { hashKey, authenticateAgent, requireAgentScope, requireUserDelegation, optionalUserDelegation, requireUserPermission };
