@@ -10,6 +10,7 @@ const rentalRoutes = require("./routes/RentalRoutes");
 const operationsRoutes = require("./routes/OperationsRoutes");
 const contactRoutes = require("./routes/ContactRoutes");
 const agentRoutes = require("./routes/AgentRoutes");
+const assistantRoutes = require("./routes/AssistantRoutes");
 
 const app = express();
 const allowedOrigins = (process.env.CORS_ORIGINS || "https://haven-rentals-tau.vercel.app,http://localhost:5000")
@@ -39,6 +40,7 @@ app.use("/api/v1", rentalRoutes);
 app.use("/api/v1", operationsRoutes);
 app.use("/api/v1", contactRoutes);
 app.use("/api/v1", agentRoutes);
+app.use("/api/v1", assistantRoutes);
 
 app.use((error, req, res, next) => {
   if (error) return res.status(400).json({ success: false, message: error.message || "Request could not be processed" });
