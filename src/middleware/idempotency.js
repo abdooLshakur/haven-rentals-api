@@ -14,7 +14,9 @@ const requireIdempotency = (operation) => async (req, res, next) => {
     const record = await AgentIdempotencyKey.create({ ...filter, expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000) });
     const originalJson = res.json.bind(res);
     res.json = (body) => {
-      if (res.statusCode >= 200 && res.statusCode < 300) AgentIdempotencyKey.updateOne({ _id: record._id }, { state: "completed", status_code: res.statusCode, response: body }).catch(() => {});
+      // Persist both success and validated failure responses. Retrying the same
+      // logical request then receives the same result rather than a conflict.
+      AgentIdempotencyKey.updateOne({ _id: record._id }, { state: "completed", status_code: res.statusCode, response: body }).catch(() => {});
       return originalJson(body);
     };
     next();

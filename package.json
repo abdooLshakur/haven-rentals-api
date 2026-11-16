@@ -6,7 +6,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "seed:staging": "node scripts/seedStaging.js"
+    "seed:staging": "node scripts/seedStaging.js",
+    "test:staging-auth": "node scripts/testStagingAuthorization.js"
   },
   "author": "",
   "license": "ISC",
