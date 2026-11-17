@@ -6,6 +6,7 @@ const { requireIdempotency } = require("../middleware/idempotency");
 const { agentRateLimit } = require("../middleware/agentRateLimit");
 
 router.get("/agent/access-keys", authenticate, allowRoles("admin"), controller.listKeys);
+router.get("/agent/audit-logs", authenticate, allowRoles("admin"), controller.listAuditLogs);
 router.post("/agent/access-keys", authenticate, allowRoles("admin"), controller.createKey);
 router.delete("/agent/access-keys/:id", authenticate, allowRoles("admin"), controller.revokeKey);
 

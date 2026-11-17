@@ -84,6 +84,22 @@ const listKeys = async (req, res) => {
   res.json({ success: true, data: keys, available_scopes: AVAILABLE_SCOPES });
 };
 
+const listAuditLogs = async (req, res) => {
+  const { page, limit } = pagination(req.query);
+  const filter = {};
+  if (req.query.action) filter.action = req.query.action;
+  if (req.query.outcome && ["success", "denied", "failed"].includes(req.query.outcome)) filter.outcome = req.query.outcome;
+  if (req.query.api_key_id) filter.api_key_id = req.query.api_key_id;
+  const [logs, total] = await Promise.all([
+    AgentAuditLog.find(filter)
+      .populate("api_key_id", "name key_prefix")
+      .populate("acting_user_id", "first_name last_name email")
+      .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+    AgentAuditLog.countDocuments(filter),
+  ]);
+  res.json({ success: true, data: logs, meta: pageMeta(page, limit, total) });
+};
+
 const createKey = async (req, res) => {
   const { name, scopes = [], expires_at } = req.body;
   if (!name || !Array.isArray(scopes) || !scopes.length) return res.status(400).json({ success: false, message: "A key name and at least one scope are required" });
@@ -225,4 +241,4 @@ const createDraft = async (req, res) => {
   res.status(201).json({ success: true, message: "Draft saved for human approval. Nothing has been sent.", data: draft });
 };
 
-module.exports = { AVAILABLE_SCOPES, listKeys, createKey, revokeKey, agentCapabilities, listProperties, listEnquiries, updateEnquiry, listViewings, proposeReschedule, listApplications, listMaintenance, createDraft };
+module.exports = { AVAILABLE_SCOPES, listKeys, listAuditLogs, createKey, revokeKey, agentCapabilities, listProperties, listEnquiries, updateEnquiry, listViewings, proposeReschedule, listApplications, listMaintenance, createDraft };
