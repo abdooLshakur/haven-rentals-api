@@ -162,7 +162,7 @@ const listEnquiries = async (req, res) => {
   if (req.query.status) filter.status = req.query.status;
   if (req.query.search) filter = withCondition(filter, { $or: ["full_name", "email", "phone", "message"].map((field) => ({ [field]: new RegExp(req.query.search, "i") })) });
   const [enquiries, total] = await Promise.all([
-    Enquiry.find(filter).populate("property_id", "name location").populate("house_id", "name location").sort({ date_created: -1 }).skip((page - 1) * limit).limit(limit),
+    Enquiry.find(filter).select("-email -phone").populate("property_id", "name location").populate("house_id", "name location").sort({ date_created: -1 }).skip((page - 1) * limit).limit(limit),
     Enquiry.countDocuments(filter),
   ]);
   await audit(req, "enquiries.list", "success", {}, { count: total, page, limit });
@@ -184,7 +184,7 @@ const listViewings = async (req, res) => {
   const filter = await viewingFilterFor(req);
   if (req.query.status) filter.status = req.query.status;
   const [viewings, total] = await Promise.all([
-    ViewingAppointment.find(filter).populate("property_id", "name location").populate("house_id", "name location").sort({ scheduled_at: 1 }).skip((page - 1) * limit).limit(limit),
+    ViewingAppointment.find(filter).select("-email -phone").populate("property_id", "name location").populate("house_id", "name location").sort({ scheduled_at: 1 }).skip((page - 1) * limit).limit(limit),
     ViewingAppointment.countDocuments(filter),
   ]);
   await audit(req, "viewings.list", "success", {}, { count: total, page, limit });
@@ -212,7 +212,7 @@ const listApplications = async (req, res) => {
   const filter = await applicationFilterFor(req);
   if (req.query.status) filter.status = req.query.status;
   const [applications, total] = await Promise.all([
-    RentalApplication.find(filter).populate("tenant_id", "first_name last_name email phone").populate("property_id", "name location").populate("house_id", "name location").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+    RentalApplication.find(filter).select("-documents -monthly_income -employer_name").populate("tenant_id", "first_name last_name").populate("property_id", "name location").populate("house_id", "name location").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
     RentalApplication.countDocuments(filter),
   ]);
   await audit(req, "applications.list", "success", {}, { count: total, page, limit });
@@ -224,7 +224,7 @@ const listMaintenance = async (req, res) => {
   const filter = await maintenanceFilterFor(req);
   if (req.query.status) filter.status = req.query.status;
   const [requests, total] = await Promise.all([
-    MaintenanceRequest.find(filter).populate("house_id", "name location").populate("tenant_id", "first_name last_name phone").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+    MaintenanceRequest.find(filter).populate("house_id", "name location").populate("tenant_id", "first_name last_name").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
     MaintenanceRequest.countDocuments(filter),
   ]);
   await audit(req, "maintenance.list", "success", {}, { count: total, page, limit });
