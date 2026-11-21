@@ -29,6 +29,20 @@ const createConversation = async (req, res) => {
   res.status(201).json({ success: true, data: { conversation_id: conversation._id, ...(guestToken && { guest_token: guestToken }), active_role: activeRole } });
 };
 
+// Deliberately returns configuration presence only—never secret values.
+const getAssistantStatus = async (req, res) => {
+  const endpoint = String(process.env.AI_ASSISTANT_URL || "").trim();
+  res.json({
+    success: true,
+    data: {
+      proxy_configured: Boolean(endpoint),
+      shared_secret_configured: Boolean(process.env.AI_ASSISTANT_SHARED_SECRET),
+      endpoint_origin: endpoint ? (() => { try { return new URL(endpoint).origin; } catch (_) { return "invalid URL"; } })() : null,
+      preview_mode: !endpoint,
+    },
+  });
+};
+
 const loadConversation = async (req) => {
   const conversation = await AssistantConversation.findById(req.params.id).select("+guest_token_hash");
   if (!conversation) return null;
@@ -80,4 +94,4 @@ const sendMessage = async (req, res) => {
   }
 };
 
-module.exports = { createConversation, sendMessage };
+module.exports = { createConversation, getAssistantStatus, sendMessage };
