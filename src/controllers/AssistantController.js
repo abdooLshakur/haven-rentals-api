@@ -56,13 +56,19 @@ const loadConversation = async (req) => {
 };
 
 const externalReply = async ({ conversation, message, user }) => {
-  const endpoint = process.env.AI_ASSISTANT_URL;
-  if (!endpoint) return { reply: previewReply(message, user && verifiedContext(user.user, user.activeRole)), preview: true };
+  const endpoint = String(process.env.AI_ASSISTANT_URL || "").trim();
+  if (!endpoint) {
+    console.warn("[haven-assistant-proxy] Preview response: AI_ASSISTANT_URL is missing in the running service environment.");
+    return { reply: previewReply(message, user && verifiedContext(user.user, user.activeRole)), preview: true };
+  }
+  let endpointOrigin = "invalid URL";
+  try { endpointOrigin = new URL(endpoint).origin; } catch (_) {}
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
     const context = user && verifiedContext(user.user, user.activeRole);
     const delegation_token = user ? createDelegationToken(user.user, user.activeRole, null, conversation._id.toString()) : null;
+    console.info(`[haven-assistant-proxy] Forwarding chat request to ${endpointOrigin}; authenticated=${Boolean(user)}.`);
     const response = await fetch(endpoint, {
       method: "POST",
       signal: controller.signal,
@@ -70,8 +76,15 @@ const externalReply = async ({ conversation, message, user }) => {
       body: JSON.stringify({ conversation_id: conversation._id.toString(), message, context, delegation_token }),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok || typeof body.reply !== "string") throw new Error("Assistant service unavailable");
+    if (!response.ok || typeof body.reply !== "string") {
+      console.warn(`[haven-assistant-proxy] Upstream responded with HTTP ${response.status}; valid_reply=${typeof body.reply === "string"}.`);
+      throw new Error("Assistant service unavailable");
+    }
+    console.info(`[haven-assistant-proxy] Upstream response accepted from ${endpointOrigin}.`);
     return { reply: body.reply.slice(0, 4000), preview: false };
+  } catch (error) {
+    console.error(`[haven-assistant-proxy] Upstream request failed for ${endpointOrigin}: ${error.name || "Error"} ${error.message || ""}`);
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
