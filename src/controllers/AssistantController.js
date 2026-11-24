@@ -1,5 +1,8 @@
 const crypto = require("crypto");
+const mongoose = require("mongoose");
 const AssistantConversation = require("../models/AssistantConversation");
+const Property = require("../models/propertymodels");
+const House = require("../models/HouseModel");
 const { createDelegationToken } = require("../middleware/auth");
 const { verifiedContext } = require("../services/accessControl");
 
@@ -32,6 +35,30 @@ const assistantUi = (value) => {
     price_period: ["monthly", "annual", "one_time"].includes(item?.price_period) ? item.price_period : "annual",
     property_page_url: string(item?.property_page_url, 1000),
   })).filter((item) => item.id && item.name);
+  return items.length ? { type: "property_cards", items } : null;
+};
+
+// Compatibility layer: while the existing Python agent returns a normal
+// Markdown listing link, Haven enriches it into a safe visual property card.
+const cardsFromListingLinks = async (reply) => {
+  const ids = [...String(reply || "").matchAll(/#\/home\/([a-f\d]{24})/gi)].map((match) => match[1]);
+  const uniqueIds = [...new Set(ids)].slice(0, 6).filter((id) => mongoose.isValidObjectId(id));
+  if (!uniqueIds.length) return null;
+  const available = { _id: { $in: uniqueIds }, status: "available" };
+  const [properties, houses] = await Promise.all([
+    Property.find(available).select("name type location description bedrooms bathrooms valuation currency listing_intent price_period images"),
+    House.find(available).select("name location description bedrooms bathrooms valuation currency listing_intent price_period images"),
+  ]);
+  const toCard = (listing, listing_kind) => ({
+    id: listing._id.toString(), listing_kind, name: listing.name, type: listing.type || "Home", location: listing.location,
+    image: listing.images?.find(Boolean) || "", description: listing.description || "", bedrooms: listing.bedrooms,
+    bathrooms: listing.bathrooms, valuation: listing.valuation, currency: listing.currency || "NGN",
+    listing_intent: listing.listing_intent === "sale" ? "sale" : "rent",
+    price_period: listing.listing_intent === "sale" ? "one_time" : (["monthly", "annual"].includes(listing.price_period) ? listing.price_period : "annual"),
+    property_page_url: `${(process.env.PUBLIC_APP_URL || "https://haven-rentals-tau.vercel.app").replace(/\/$/, "")}/#/home/${listing._id}`,
+  });
+  const records = [...properties.map((item) => toCard(item, "property")), ...houses.map((item) => toCard(item, "house"))];
+  const items = uniqueIds.map((id) => records.find((item) => item.id === id)).filter(Boolean);
   return items.length ? { type: "property_cards", items } : null;
 };
 
@@ -98,7 +125,8 @@ const externalReply = async ({ conversation, message, user }) => {
       throw new Error("Assistant service unavailable");
     }
     console.info(`[haven-assistant-proxy] Upstream response accepted from ${endpointOrigin}.`);
-    return { reply: body.reply.slice(0, 4000), ui: assistantUi(body.ui), preview: false };
+    const reply = body.reply.slice(0, 4000);
+    return { reply, ui: assistantUi(body.ui) || await cardsFromListingLinks(reply), preview: false };
   } catch (error) {
     console.error(`[haven-assistant-proxy] Upstream request failed for ${endpointOrigin}: ${error.name || "Error"} ${error.message || ""}`);
     throw error;
