@@ -18,6 +18,23 @@ const previewReply = (message, context) => {
   return "Welcome to Haven. I can help you search available homes, understand renting or buying, and guide you through the next step.";
 };
 
+const assistantUi = (value) => {
+  if (!value || typeof value !== "object" || value.type !== "property_cards" || !Array.isArray(value.items)) return null;
+  const string = (field, max = 300) => typeof field === "string" ? field.trim().slice(0, max) : "";
+  const number = (field) => Number.isFinite(field) ? field : null;
+  const items = value.items.slice(0, 6).map((item) => ({
+    id: string(item?.id || item?._id, 100),
+    listing_kind: ["property", "house"].includes(item?.listing_kind) ? item.listing_kind : "property",
+    name: string(item?.name, 120), type: string(item?.type, 60), location: string(item?.location, 200),
+    image: string(item?.image || item?.images?.[0], 1000), description: string(item?.description, 700),
+    bedrooms: number(item?.bedrooms), bathrooms: number(item?.bathrooms), valuation: number(item?.valuation),
+    currency: string(item?.currency, 10) || "NGN", listing_intent: item?.listing_intent === "sale" ? "sale" : "rent",
+    price_period: ["monthly", "annual", "one_time"].includes(item?.price_period) ? item.price_period : "annual",
+    property_page_url: string(item?.property_page_url, 1000),
+  })).filter((item) => item.id && item.name);
+  return items.length ? { type: "property_cards", items } : null;
+};
+
 const createConversation = async (req, res) => {
   const activeRole = req.user ? req.activeRole : null;
   const guestToken = req.user ? null : crypto.randomBytes(32).toString("base64url");
@@ -81,7 +98,7 @@ const externalReply = async ({ conversation, message, user }) => {
       throw new Error("Assistant service unavailable");
     }
     console.info(`[haven-assistant-proxy] Upstream response accepted from ${endpointOrigin}.`);
-    return { reply: body.reply.slice(0, 4000), preview: false };
+    return { reply: body.reply.slice(0, 4000), ui: assistantUi(body.ui), preview: false };
   } catch (error) {
     console.error(`[haven-assistant-proxy] Upstream request failed for ${endpointOrigin}: ${error.name || "Error"} ${error.message || ""}`);
     throw error;
@@ -101,7 +118,7 @@ const sendMessage = async (req, res) => {
     conversation.messages.push({ role: "assistant", content: result.reply });
     conversation.messages = conversation.messages.slice(-40);
     await conversation.save();
-    res.json({ success: true, data: { conversation_id: conversation._id, reply: result.reply, preview: result.preview } });
+    res.json({ success: true, data: { conversation_id: conversation._id, reply: result.reply, ui: result.ui || null, preview: result.preview } });
   } catch (error) {
     res.status(502).json({ success: false, message: "The Haven assistant is temporarily unavailable. Please try again." });
   }

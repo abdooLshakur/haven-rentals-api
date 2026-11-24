@@ -34,11 +34,26 @@ const listEnquiries = async (req, res) => {
   res.json({ success: true, data: enquiries });
 };
 
+const canManageEnquiry = async (enquiry, user) => {
+  if (user.role === "admin") return true;
+  if (user.role === "agent") return enquiry.assigned_agent_id?.toString() === user.id;
+  if (user.role !== "landlord") return false;
+  if (enquiry.property_id) return Boolean(await Property.exists({ _id: enquiry.property_id, landlord_id: user._id }));
+  if (enquiry.house_id) return Boolean(await House.exists({ _id: enquiry.house_id, landlord_id: user._id }));
+  return false;
+};
+
 const updateEnquiry = async (req, res) => {
   const enquiry = await Enquiry.findById(req.params.id);
   if (!enquiry) return res.status(404).json({ success: false, message: "Enquiry not found" });
-  if (req.body.status) enquiry.status = req.body.status;
+  if (!(await canManageEnquiry(enquiry, req.user))) return res.status(404).json({ success: false, message: "Enquiry not found" });
+  if (req.body.status) {
+    const statuses = ["new", "contacted", "qualified", "closed", "archived"];
+    if (!statuses.includes(req.body.status)) return res.status(400).json({ success: false, message: "Choose a valid enquiry status" });
+    enquiry.status = req.body.status;
+  }
   if (req.body.assigned_agent_id) {
+    if (!["admin", "landlord"].includes(req.user.role)) return res.status(403).json({ success: false, message: "Only a landlord or administrator can assign an agent" });
     const agent = await User.findOne({ _id: req.body.assigned_agent_id, role: "agent", is_active: true });
     if (!agent) return res.status(404).json({ success: false, message: "Active agent not found" });
     enquiry.assigned_agent_id = agent._id;
